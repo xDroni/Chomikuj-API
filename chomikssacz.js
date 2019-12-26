@@ -1,10 +1,8 @@
 const fetch = require('node-fetch');
 const cheerio = require('cheerio');
+const fs = require('fs');
 
-const auth = {
-    cookie: '',
-    token: '',
-};
+const auth = JSON.parse(fs.readFileSync('auth.json').toString()); // read json file with cookie and token
 
 async function makeRequest (url, headers) {
     const res = await fetch(url, headers);
@@ -81,15 +79,37 @@ const hamster = {
                 const $ = cheerio.load(html);
                 return $('input[name="selectFileItem"]').map((i, e) => $(e).attr('value')).get();
             });
+    },
+
+    changeFileName: (fileId, name) => {
+        const url = 'http://chomikuj.pl/action/FileDetails/EditNameAndDescAction';
+        const headers = {
+            headers: {
+                'cookie': auth.cookie,
+                'content-type': 'application/x-www-form-urlencoded',
+                'x-requested-with': 'XMLHttpRequest'
+            },
+            body: `FileId=${fileId}&Name=${name}&__RequestVerificationToken=${auth.token}`,
+            method: 'POST'
+        };
+
+        return makeRequest(url, headers);
     }
 };
 
-(() => {
-    function getFilesIds() {
-        hamster.getFilesIds(9).then(res => console.log(res));
+(async () => {
+    async function  getFilesIds() {
+        return hamster.getFilesIds('', '')
     }
 
-    getFilesIds();
+    async function changeNames(name) {
+        const ids = await getFilesIds();
+        for(let id of ids) {
+            await hamster.changeFileName(id, name).catch(err => console.log(err));
+        }
+    }
+
+    await changeNames('');
 
     async function copyFiles() {
         /* Copy file */
@@ -97,8 +117,7 @@ const hamster = {
         for(let i = 0; i<10; i++) promises.push(hamster.copyFile());
 
         const results = await Promise.all(promises.map(p => p.catch(e => e)));
-        const errors = results.filter(r => (r instanceof Error));
-        console.log(results);
+        const errors = results.filter(r => (r instanceof Error));console.log(results);
     }
 
     function getLastSeen() {
