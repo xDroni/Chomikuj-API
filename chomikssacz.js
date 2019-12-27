@@ -4,69 +4,71 @@ const { makeRequest } = require('./common');
 
 const auth = JSON.parse(fs.readFileSync('auth.json').toString()); // read json file with cookie and token
 
+const headers = {
+    'cookie': auth.cookie,
+    'content-type': 'application/x-www-form-urlencoded',
+    'x-requested-with': 'XMLHttpRequest'
+};
+
 const hamster = {
     getLastSeen: count => {
         const url = `http://chomikuj.pl/action/LastAccounts/LastSeen?itemsCount=${count}`;
-        const headers = {
-            'headers': {
-                'x-requested-with': 'XMLHttpRequest'
-            },
+        const _headers = {
+            headers,
             'method': 'GET'
         };
 
-        return makeRequest(url, headers)
+        return makeRequest(url, _headers)
+            .then(res => res.json())
             .then(res => {
                 const $ = cheerio.load(res.Data, {normalizeWhitespace: true});
                 return $('p[class="avatarNickname"]').map((i, e) => $(e).text()).get();
-
             })
-            // .catch(err => console.error(err));
     },
 
-    login: () => {
+    login: (login, password) => {
         const url = 'http://chomikuj.pl/action/Login/TopBarLogin';
-        const data = {
-            Login: '',
-            Password: '',
-        };
-        const headers = {
-            headers: {
-                'cookie': '',
-                "content-type": 'application/x-www-form-urlencoded',
-                'x-requested-with': 'XMLHttpRequest'
-            },
-            body: `Login=${data.Login}&Password=${data.Password}`,
+        const _headers = {
+            headers,
+            body: `Login=${login}&Password=${password}`,
             method: 'POST'
         };
-        makeRequest(url, headers).then(res => console.log(res));
+
+        return makeRequest(url, _headers)
+            .then(res => {
+                const cookieRaw = res.headers.raw()['set-cookie'];
+                const cookieString = cookieRaw.map(e => e.split(' ')[0]).join(' ');
+                const cookie = {
+                    cookie: cookieString
+                };
+                fs.writeFileSync('auth.json', JSON.stringify(cookie, null,2));
+                return res.text();
+            })
     },
 
     copyFile: (chomikName, folderId, fileId, folderTo) => {
         const url = 'http://chomikuj.pl/action/FileDetails/CopyFileAction';
-        const headers = {
-            headers: {
-                'cookie': auth.cookie,
-                "content-type": 'application/x-www-form-urlencoded',
-                'x-requested-with': 'XMLHttpRequest'
-            },
-            body: `ChomikName=${chomikName}&FolderId=${folderId}&FileId=${fileId}&FolderTo=${folderTo}&__RequestVerificationToken=${auth.token}`,
+        const _headers = {
+            headers,
+            body: `ChomikName=${chomikName}&FolderId=${folderId}&FileId=${fileId}&FolderTo=${folderTo}`,
             method: 'POST'
         };
-        return makeRequest(url, headers);
+
+        return makeRequest(url, _headers).then(res => {
+            return res.json()
+        });
     },
 
     getFolderIdFromName: (chomikName, folderName) => {
         const url = 'http://chomikuj.pl/action/tree/loadtree';
-        const headers = {
-            headers: {
-                'cookie': auth.cookie,
-                "content-type": 'application/x-www-form-urlencoded',
-                'x-requested-with': 'XMLHttpRequest'
-            },
+        const _headers = {
+            headers,
             body: `ChomikName=${chomikName}&FolderId=0&__RequestVerificationToken=${auth.token}`,
             method: 'POST'
         };
-        return makeRequest(url, headers)
+
+        return makeRequest(url, _headers)
+            .then(res => res.text())
             .then(html => {
                 const $ = cheerio.load(html);
                 return $(`.accountTree a[title="${folderName}"]`).map((i, e) => $(e).attr('rel')).get();
@@ -75,16 +77,14 @@ const hamster = {
 
     getFilesIdsFromFolder: async (chomikName, folderId, pageNr = 1) => {
         const url = 'http://chomikuj.pl/action/Files/FilesList';
-        const headers = {
-            headers: {
-                'cookie': auth.cookie,
-                'content-type': 'application/x-www-form-urlencoded',
-                'x-requested-with': 'XMLHttpRequest'
-            },
+        const _headers = {
+            headers,
             body: `ChomikName=${chomikName}&FolderId=${folderId}&PageNr=${pageNr}&__RequestVerificationToken=${auth.token}`,
             method: 'POST'
         };
-        return makeRequest(url, headers)
+
+        return makeRequest(url, _headers)
+            .then(res => res.text())
             .then(html => {
                 const $ = cheerio.load(html);
                 return $('input[name="selectFileItem"]').map((i, e) => $(e).attr('value')).get();
@@ -93,17 +93,14 @@ const hamster = {
 
     getAllFilesIdsFromFolder: async (chomikName, folderId) => {
         const url = 'http://chomikuj.pl/action/Files/FilesList';
-        const headers = {
-            headers: {
-                'cookie': auth.cookie,
-                'content-type': 'application/x-www-form-urlencoded',
-                'x-requested-with': 'XMLHttpRequest'
-            },
+        const _headers = {
+            headers,
             body: `ChomikName=${chomikName}&FolderId=${folderId}&__RequestVerificationToken=${auth.token}`,
             method: 'POST'
         };
 
-        const pages = await makeRequest(url, headers)
+        const pages = await makeRequest(url, _headers)
+            .then(res => res.text())
             .then(html => {
                 const $ = cheerio.load(html);
                 const filesCount = $('.fileInfoSmallFrame > p > span:nth-child(1)').text();
@@ -121,17 +118,13 @@ const hamster = {
 
     changeFileName: (fileId, name) => {
         const url = 'http://chomikuj.pl/action/FileDetails/EditNameAndDescAction';
-        const headers = {
-            headers: {
-                'cookie': auth.cookie,
-                'content-type': 'application/x-www-form-urlencoded',
-                'x-requested-with': 'XMLHttpRequest'
-            },
-            body: `FileId=${fileId}&Name=${name}&__RequestVerificationToken=${auth.token}`,
+        const _headers = {
+            headers,
+            body: `FileId=${fileId}&Name=${name}`,
             method: 'POST'
         };
 
-        return makeRequest(url, headers);
+        return makeRequest(url, _headers).then(res => res.text());
     }
 };
 
