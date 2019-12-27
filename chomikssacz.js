@@ -1,16 +1,8 @@
-const fetch = require('node-fetch');
 const cheerio = require('cheerio');
 const fs = require('fs');
+const { makeRequest } = require('./common');
 
 const auth = JSON.parse(fs.readFileSync('auth.json').toString()); // read json file with cookie and token
-
-async function makeRequest (url, headers) {
-    const res = await fetch(url, headers);
-    return new Promise((resolve, reject) => {
-        if(res.ok) resolve(res.text());
-        else reject(new Error(res.statusText));
-    })
-}
 
 const hamster = {
     getLastSeen: count => {
@@ -63,7 +55,25 @@ const hamster = {
         return makeRequest(url, headers);
     },
 
-    getFilesIds: async (chomikName, folderId) => {
+    getFilesIdsFromFolder: async (chomikName, folderId, pageNr = 1) => {
+        const url = 'http://chomikuj.pl/action/Files/FilesList';
+        const headers = {
+            headers: {
+                'cookie': auth.cookie,
+                'content-type': 'application/x-www-form-urlencoded',
+                'x-requested-with': 'XMLHttpRequest'
+            },
+            body: `ChomikName=${chomikName}&FolderId=${folderId}&PageNr=${pageNr}&__RequestVerificationToken=${auth.token}`,
+            method: 'POST'
+        };
+        return makeRequest(url, headers)
+            .then(html => {
+                const $ = cheerio.load(html);
+                return $('input[name="selectFileItem"]').map((i, e) => $(e).attr('value')).get();
+            });
+    },
+
+    getAllFilesIdsFromFolder: async (chomikName, folderId) => {
         const url = 'http://chomikuj.pl/action/Files/FilesList';
         const headers = {
             headers: {
@@ -74,11 +84,21 @@ const hamster = {
             body: `ChomikName=${chomikName}&FolderId=${folderId}&__RequestVerificationToken=${auth.token}`,
             method: 'POST'
         };
-        return makeRequest(url, headers)
+
+        const pages = await makeRequest(url, headers)
             .then(html => {
                 const $ = cheerio.load(html);
-                return $('input[name="selectFileItem"]').map((i, e) => $(e).attr('value')).get();
+                const filesCount = $('.fileInfoSmallFrame > p > span:nth-child(1)').text();
+                return Math.ceil(filesCount / 30);
             });
+
+        let promises = [];
+        for(let i = 1; i<=pages; i++) {
+            promises.push(hamster.getFilesIdsFromFolder(chomikName, folderId, i));
+        }
+
+        const result = await Promise.all(promises);
+        return result.flat();
     },
 
     changeFileName: (fileId, name) => {
@@ -97,34 +117,4 @@ const hamster = {
     }
 };
 
-(async () => {
-    async function  getFilesIds() {
-        return hamster.getFilesIds('', '')
-    }
-
-    async function changeNames(name) {
-        const ids = await getFilesIds();
-        for(let id of ids) {
-            await hamster.changeFileName(id, name).catch(err => console.log(err));
-        }
-    }
-
-    await changeNames('');
-
-    async function copyFiles() {
-        /* Copy file */
-        let promises = [];
-        for(let i = 0; i<10; i++) promises.push(hamster.copyFile());
-
-        const results = await Promise.all(promises.map(p => p.catch(e => e)));
-        const errors = results.filter(r => (r instanceof Error));console.log(results);
-    }
-
-    function getLastSeen() {
-        hamster.getLastSeen(100)
-            .then(res => console.log(res))
-            .catch(err => console.error(err));
-    }
-
-
-})();
+module.exports = hamster;
