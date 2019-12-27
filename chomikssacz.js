@@ -55,6 +55,24 @@ const hamster = {
         return makeRequest(url, headers);
     },
 
+    getFolderIdFromName: (chomikName, folderName) => {
+        const url = 'http://chomikuj.pl/action/tree/loadtree';
+        const headers = {
+            headers: {
+                'cookie': auth.cookie,
+                "content-type": 'application/x-www-form-urlencoded',
+                'x-requested-with': 'XMLHttpRequest'
+            },
+            body: `ChomikName=${chomikName}&FolderId=0&__RequestVerificationToken=${auth.token}`,
+            method: 'POST'
+        };
+        return makeRequest(url, headers)
+            .then(html => {
+                const $ = cheerio.load(html);
+                return $(`.accountTree a[title="${folderName}"]`).map((i, e) => $(e).attr('rel')).get();
+            });
+    },
+
     getFilesIdsFromFolder: async (chomikName, folderId, pageNr = 1) => {
         const url = 'http://chomikuj.pl/action/Files/FilesList';
         const headers = {
