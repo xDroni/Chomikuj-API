@@ -1,4 +1,5 @@
 const cheerio = require('cheerio');
+const puppeteer = require('puppeteer-core');
 const fs = require('fs');
 const { makeRequest } = require('./common');
 
@@ -11,6 +12,54 @@ const headers = {
 };
 
 const hamster = {
+    login: async (login, password, path = 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe') => {
+        console.log('Launching the browser in headless mode');
+        const browser = await puppeteer.launch({
+            executablePath: path
+        });
+
+        const page = await browser.newPage();
+        console.log('Opening login page');
+        await page.goto(`http://chomikuj.pl/${login}`, { waitUntil: 'networkidle2' });
+
+        await (await page.waitFor('input[name="Login"]')).asElement().type(login);
+        await page.type('input[name="Password"]', password);
+        await page.keyboard.press('Enter');
+        console.log('Logging in...');
+
+        const requestTrigger = (await page.waitFor('#quickSearchRadioGroupTooltip input')).asElement();
+        await page.setRequestInterception(true);
+
+        let token = null;
+        await page.on('request', async request => {
+            if(request.url().includes('HidePromoNotification')) {
+                token = request._postData.substring(request._postData.indexOf('=')+1);
+            }
+            request.continue();
+        });
+
+        await requestTrigger.click();
+
+        const cookiesArr = await page.cookies();
+        let cookies = '';
+        for(let cookie of cookiesArr) {
+            cookies += cookie.name + '=' + cookie.value + '; ';
+        }
+
+        browser.close();
+
+        const auth = {
+            cookie: cookies,
+            token: token,
+        };
+
+        console.log('Saving the cookies and token');
+        fs.writeFileSync('auth.json', JSON.stringify(auth, null,2));
+        console.log('Saved!');
+
+        return 'Logged in successfully';
+    },
+
     getLastSeen: count => {
         const url = `http://chomikuj.pl/action/LastAccounts/LastSeen?itemsCount=${count}`;
         const _headers = {
@@ -26,23 +75,25 @@ const hamster = {
             })
     },
 
-    login: (login, password) => {
-        const url = 'http://chomikuj.pl/action/Login/TopBarLogin';
+    createFolder: (chomikName, folderId, folderName, adultContent = false, password = '') => {
+        const url = 'https://chomikuj.pl/action/FolderOptions/NewFolderAction';
         const _headers = {
             headers,
-            body: `Login=${login}&Password=${password}`,
+            body: `FolderId=${folderId}&ChomikName=${chomikName}&FolderName=${folderName}&AdultContent=${adultContent}&Password=${password}&__RequestVerificationToken=${auth.token}`,
             method: 'POST'
         };
 
         return makeRequest(url, _headers)
-            .then(res => {
-                const cookieRaw = res.headers.raw()['set-cookie'];
-                const cookieString = cookieRaw.map(e => e.split(' ')[0]).join(' ');
-                const cookie = {
-                    cookie: cookieString
-                };
-                fs.writeFileSync('auth.json', JSON.stringify(cookie, null,2));
-                return res.text();
+            .then(res => res.json())
+            .then(json => {
+                if(json.Data !== null && json.Data.Status === 0) {
+                    return json.Content;
+                }
+                else {
+                    const $ = cheerio.load(json.Content);
+                    if(json.Data !== null) return $('.errorText').text().trim();
+                    else return $('div').text().trim();
+                }
             })
     },
 
@@ -54,9 +105,9 @@ const hamster = {
             method: 'POST'
         };
 
-        return makeRequest(url, _headers).then(res => {
-            return res.json()
-        });
+        return makeRequest(url, _headers)
+            .then(res => res)
+            .catch(err => err);
     },
 
     getFolderIdFromName: (chomikName, folderName) => {
@@ -75,7 +126,24 @@ const hamster = {
             });
     },
 
+    getAllFoldersNames: (chomikName) => {
+        const url = 'http://chomikuj.pl/action/tree/loadtree';
+        const _headers = {
+            headers,
+            body: `ChomikName=${chomikName}&FolderId=0&__RequestVerificationToken=${auth.token}`,
+            method: 'POST'
+        };
+
+        return makeRequest(url, _headers)
+            .then(res => res.text())
+            .then(html => {
+                const $ = cheerio.load(html);
+                return $('.accountTree a').map((i, e) => $(e).text()).get();
+            });
+    },
+
     getFilesIdsFromFolder: async (chomikName, folderId, pageNr = 1) => {
+        if(headers.cookie.length === 0) throw Error('No cookie, login first');
         const url = 'http://chomikuj.pl/action/Files/FilesList';
         const _headers = {
             headers,
@@ -92,6 +160,7 @@ const hamster = {
     },
 
     getAllFilesIdsFromFolder: async (chomikName, folderId) => {
+        if(headers.cookie.length === 0) throw Error('No cookie, login first');
         const url = 'http://chomikuj.pl/action/Files/FilesList';
         const _headers = {
             headers,
@@ -106,6 +175,7 @@ const hamster = {
                 const filesCount = $('.fileInfoSmallFrame > p > span:nth-child(1)').text();
                 return Math.ceil(filesCount / 30);
             });
+
 
         let promises = [];
         for(let i = 1; i<=pages; i++) {
