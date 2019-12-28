@@ -76,6 +76,7 @@ const hamster = {
     },
 
     createFolder: (chomikName, folderId, folderName, adultContent = false, password = '') => {
+        if(headers.cookie.length === 0) throw Error('No cookie, login first');
         const url = 'https://chomikuj.pl/action/FolderOptions/NewFolderAction';
         const _headers = {
             headers,
@@ -97,24 +98,34 @@ const hamster = {
             })
     },
 
-    copyFile: (chomikName, folderId, fileId, folderTo) => {
+    copyFile: (chomikName, fileId, folderTo) => {
+        if(headers.cookie.length === 0) throw Error('No cookie, login first');
         const url = 'http://chomikuj.pl/action/FileDetails/CopyFileAction';
         const _headers = {
             headers,
-            body: `ChomikName=${chomikName}&FolderId=${folderId}&FileId=${fileId}&FolderTo=${folderTo}`,
+            body: `ChomikName=${chomikName}&FileId=${fileId}&FolderTo=${folderTo}`,
             method: 'POST'
         };
 
         return makeRequest(url, _headers)
-            .then(res => res)
-            .catch(err => err);
+            .then(res => res.json())
+            .then(json => {
+                if(json.Data !== null && json.Data.Status === 'OK') {
+                    return json.Content;
+                }
+                else {
+                    const $ = cheerio.load(json.Content);
+                    if(json.Data !== null) return json.Content.trim();
+                    else return $('div').text().trim();
+                }
+            })
     },
 
     getFolderIdFromName: (chomikName, folderName) => {
         const url = 'http://chomikuj.pl/action/tree/loadtree';
         const _headers = {
             headers,
-            body: `ChomikName=${chomikName}&FolderId=0&__RequestVerificationToken=${auth.token}`,
+            body: `ChomikName=${chomikName}&__RequestVerificationToken=${auth.token}`,
             method: 'POST'
         };
 
@@ -143,7 +154,6 @@ const hamster = {
     },
 
     getFilesIdsFromFolder: async (chomikName, folderId, pageNr = 1) => {
-        if(headers.cookie.length === 0) throw Error('No cookie, login first');
         const url = 'http://chomikuj.pl/action/Files/FilesList';
         const _headers = {
             headers,
@@ -155,7 +165,7 @@ const hamster = {
             .then(res => res.text())
             .then(html => {
                 const $ = cheerio.load(html);
-                return $('input[name="selectFileItem"]').map((i, e) => $(e).attr('value')).get();
+                return $('div.fileIdContainer').map((i, e) => $(e).attr('rel')).get();
             });
     },
 
@@ -194,7 +204,18 @@ const hamster = {
             method: 'POST'
         };
 
-        return makeRequest(url, _headers).then(res => res.text());
+        return makeRequest(url, _headers)
+            .then(res => res.json())
+            .then(json => {
+                if(json.Data !== null && json.Data.Status === 'OK') {
+                    return json.Content;
+                }
+                else {
+                    const $ = cheerio.load(json.Content);
+                    if(json.Data !== null) return $('div.validation-summary-errors').text();
+                    else return $('div').text().trim();
+                }
+            })
     }
 };
 
