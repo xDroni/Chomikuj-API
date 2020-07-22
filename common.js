@@ -8,6 +8,18 @@ async function makeRequest (url, headers) {
     })
 }
 
+function cookieArrayToString(cookieArray) {
+    let cookieString = '';
+
+    for (const entry of cookieArray) {
+        const s = entry.split(';');
+        const t = s[0].split('=');
+        cookieString += t[0] + '=' + t[1] + '; ';
+    }
+    return cookieString;
+}
+
 module.exports = {
     makeRequest,
+    cookieArrayToString
 };

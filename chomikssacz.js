@@ -1,6 +1,6 @@
 const cheerio = require('cheerio');
 const fs = require('fs');
-const {makeRequest} = require('./common');
+const {makeRequest, cookieArrayToString} = require('./common');
 
 const auth = JSON.parse(fs.readFileSync('auth.json').toString()); // read json file with cookie and token
 
@@ -12,39 +12,48 @@ const headers = {
 
 const hamster = {
     login: async (login, password) => {
+        console.log('Logging in as', login);
+
         /* Getting the cookie from login request */
         const loginRequestUrl = `http://chomikuj.pl/action/Login/TopBarLogin?login=${login}&password=${password}`;
 
         const _headers = {
-            headers,
-            'method': 'POST'
+            headers: {
+                'content-type': 'application/x-www-form-urlencoded',
+                'x-requested-with': 'XMLHttpRequest'
+            },
+            'method': 'POST',
         };
 
         const loginResponse = await makeRequest(loginRequestUrl, _headers);
         const loginResponseJson = await loginResponse.json();
-        console.log(loginResponseJson);
-        const cookie = loginResponse.headers.get('set-cookie');
-        _headers.cookie = cookie;
-        console.log('Cookies saved successfully');
 
-        /* Getting the token*/
-        const tokenResponse = await makeRequest('http://chomikuj.pl/', _headers);
-        const tokenResponseText = await tokenResponse.text();
+        if (loginResponseJson.Data && loginResponseJson.Data.hasOwnProperty('LoggedIn') && loginResponseJson.Data.LoggedIn === true) {
+            let cookiesArray = loginResponse.headers.raw()['set-cookie'];
 
-        const $ = cheerio.load(tokenResponseText);
-        const token = $('input[name="__RequestVerificationToken"]').attr('value');
-        console.log(token);
+            _headers.cookie = cookieArrayToString(cookiesArray);
 
-        const auth = {
-            cookie,
-            token
-        };
+            /* Getting the tokens*/
+            const tokenResponse = await makeRequest('http://chomikuj.pl/', _headers);
+            cookiesArray = tokenResponse.headers.raw()['set-cookie'];
 
-        console.log('Saving the cookies and token');
-        fs.writeFileSync('auth.json', JSON.stringify(auth, null, 2));
-        console.log('Saved!');
+            const tokenResponseText = await tokenResponse.text();
+            const $ = cheerio.load(tokenResponseText);
+            const token = $('input[name="__RequestVerificationToken"]').attr('value');
 
-        return 'Logged in successfully';
+            const auth = {
+                cookie: cookieArrayToString(cookiesArray),
+                token
+            };
+
+            console.log('Saving the cookies and token');
+            fs.writeFileSync('auth.json', JSON.stringify(auth, null, 2));
+            console.log('Saved!');
+
+            return 'Logged in successfully';
+        } else {
+            throw new Error(JSON.stringify(loginResponseJson, null, 2));
+        }
     },
 
     getLastSeen: count => {
